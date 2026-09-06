@@ -1,0 +1,44 @@
+﻿using MelonLoader.Utils;
+using System;
+using System.IO;
+
+namespace AutoUpdatingPlugin
+{
+	internal static class FileUtils
+	{
+
+		internal static string PluginsFolder { get; }
+		internal static string ModsFolder { get; }
+
+		static FileUtils()
+		{
+			PluginsFolder = Path.Combine(Implementation.GameFolder, "Plugins");
+			ModsFolder = Path.Combine(Implementation.GameFolder, "Mods");
+		}
+
+		public static string GetDestination(string link)
+		{
+			return string.IsNullOrWhiteSpace(link)
+				? throw new ArgumentException("Invalid link argument")
+				: Path.Combine(ModsFolder, Path.GetFileName(link));
+		}
+
+		public static string GetDestinationPlugin(string link)
+		{
+			return string.IsNullOrWhiteSpace(link)
+				? throw new ArgumentException("Invalid link argument")
+				: Path.Combine(PluginsFolder, Path.GetFileName(link));
+		}
+
+		internal static string GetPathSelf()
+		{
+			return Path.Combine(FileUtils.PluginsFolder, BuildInfo.Name + ".dll");
+		}
+
+		internal static string GetCleanName(string name)
+		{
+			return name.Replace("'", null).Replace(" ", null).Replace("-", null).Replace("_", null).Replace(".", null).ToLowerInvariant();
+		}
+
+	}
+}
