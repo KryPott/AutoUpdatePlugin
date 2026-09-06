@@ -1,0 +1,2 @@
+# AutoUpdatePlugin
+This updates shit.
