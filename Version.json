@@ -1,0 +1,8 @@
+{
+	"Version": "1.3.4",
+	"Download": "https://github.com/dommrogers/AutoUpdatingPlugin/releases/latest/download/AutoUpdatingPlugin.dll",
+	"GameMinVersion": "1.99",
+	"GameMaxVersion": "99.99",
+	"MelonLoaderMinVersion": "0.5.4.0",
+	"MelonLoaderMaxVersion": "99.99.99.99"
+}
