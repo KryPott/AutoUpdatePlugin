@@ -18,7 +18,7 @@ namespace AutoUpdatingPlugin
 		{
 			string targetDir = Path.GetDirectoryName(zipFilePath);
 			Logger.Debug($"Extracting.. {zipFilePath} > {targetDir}");
-			ZipFile.ExtractToDirectory(zipFilePath, targetDir);
+			ZipFile.ExtractToDirectory(zipFilePath, targetDir, null, overwriteFiles: true); //+allows existing files to be overwritten during extraction
 			File.Delete(zipFilePath);
 		}
 	}
