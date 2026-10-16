@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Threading;
 
@@ -14,6 +16,86 @@ namespace AutoUpdatingPlugin
 		private static readonly List<FailedUpdateInfo> failedUpdates = new List<FailedUpdateInfo>();
 
 		internal static bool pluginUpdated = false;
+
+		private static bool IsModComponent(string path)
+		{
+			return string.Equals(Path.GetExtension(path), ".modcomponent", StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static bool HasReplacementForComponent(string installedPath, List<(string, byte[]?)> downloadedData)
+		{
+			string installedName = Path.GetFileName(installedPath);
+			foreach ((string path, byte[]? data) in downloadedData)
+			{
+				if (data == null || !IsModComponent(path)) continue;
+				if (string.Equals(path, installedPath, StringComparison.OrdinalIgnoreCase) ||
+					string.Equals(Path.GetFileName(path), installedName, StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return false;
+		}
+
+		private static void ExtractModComponentsFromArchives(List<(string, byte[]?)> downloadedData, InstalledModDetail installedMod)
+		{
+			List<string> existingComponents = installedMod.Files
+				.Where(file => IsModComponent(file.filepath))
+				.Select(file => file.filepath)
+				.ToList();
+
+			List<(string, byte[]?)> extractedComponents = new List<(string, byte[]?)>();
+			foreach ((string archivePath, byte[]? data) in downloadedData.ToList())
+			{
+				if (data == null || !string.Equals(Path.GetExtension(archivePath), ".zip", StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				try
+				{
+					using MemoryStream stream = new MemoryStream(data);
+					using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read);
+					List<ZipArchiveEntry> entries = archive.Entries
+						.Where(entry => !string.IsNullOrEmpty(entry.Name) && IsModComponent(entry.FullName))
+						.ToList();
+
+					foreach (ZipArchiveEntry entry in entries)
+					{
+						string entryName = Path.GetFileName(entry.FullName);
+						string? destination = existingComponents.FirstOrDefault(path =>
+							string.Equals(Path.GetFileName(path), entryName, StringComparison.OrdinalIgnoreCase));
+
+						if (destination == null && entries.Count == 1 && existingComponents.Count == 1)
+							destination = existingComponents[0];
+						if (destination == null && entries.Count == 1)
+							destination = Path.Combine(Path.GetDirectoryName(archivePath) ?? string.Empty, entryName);
+						if (string.IsNullOrEmpty(destination))
+						{
+							Logger.Warning($"Could not determine destination for .modcomponent in {archivePath}; keeping existing component files.");
+							continue;
+						}
+
+						bool directReplacementExists = downloadedData.Any(file => file.Item2 != null && IsModComponent(file.Item1) &&
+							string.Equals(Path.GetFileName(file.Item1), Path.GetFileName(destination), StringComparison.OrdinalIgnoreCase));
+						if (directReplacementExists) continue;
+
+						using Stream entryStream = entry.Open();
+						using MemoryStream output = new MemoryStream();
+						entryStream.CopyTo(output);
+						extractedComponents.Add((destination, output.ToArray()));
+					}
+				}
+				catch (Exception e)
+				{
+					Logger.Debug($"Could not extract .modcomponent files from {archivePath}: {e.Message}");
+				}
+			}
+
+			foreach ((string path, byte[]? data) in extractedComponents)
+			{
+				int existingIndex = downloadedData.FindIndex(file =>
+					string.Equals(file.Item1, path, StringComparison.OrdinalIgnoreCase));
+				if (existingIndex >= 0) downloadedData[existingIndex] = (path, data);
+				else downloadedData.Add((path, data));
+			}
+		}
 
 		private static void LogProgress()
 		{
@@ -29,17 +111,15 @@ namespace AutoUpdatingPlugin
 					Logger.Warning($"- {f.mod.CleanName} >> {f.reason} >> {f.message}");
 				}
 			}
-			if(updatedCount > 0) 
+			if(updatedCount > 0)
 			{
 				Logger.Success("Successfully updated " + updatedCount + " mods !");
 			}
 		}
-
 		internal static void DownloadAndUpdateMods()
 		{
 //			Logger.Minor("Checking for outdated mods...");
 			List<Tuple<InstalledModDetail, APIMod>> toUpdate = new List<Tuple<InstalledModDetail, APIMod>>();
-
 			// List all installed mods that can be updated
 			foreach (KeyValuePair<InstalledModDetail, APIMod> pair in IntersectedList.installedApiMods)
 			{
@@ -63,7 +143,6 @@ namespace AutoUpdatingPlugin
 					}
 				}
 			}
-
 			toUpdateCount = toUpdate.Count;
 
 			if (toUpdateCount > 0)
@@ -82,7 +161,6 @@ namespace AutoUpdatingPlugin
 					failedUpdates.Add(new FailedUpdateInfo(installedMod, FailedUpdateReason.Disabled, APIList.GetDisabledReason(apiMod.CleanName) ?? ""));
 					continue;
 				}
-
 				Logger.Minor($"Updating '{installedMod.CleanName}' ({ii} / {toUpdateCount})...");
 				progressTotal = (int)(i / (double)toUpdateCount * 100);
 
@@ -96,7 +174,6 @@ namespace AutoUpdatingPlugin
 
 			LogProgress();
 		}
-
 		public static void UpdateInstallation(InstalledModDetail installedMod, APIMod apiMod)
 		{
 			try
@@ -118,7 +195,6 @@ namespace AutoUpdatingPlugin
 					{
 						buffer = e.Result;
 					}
-
 					downloading = false;
 				};
 				foreach (string link in apiMod.Downloads)
@@ -141,20 +217,25 @@ namespace AutoUpdatingPlugin
 					}
 				}
 
-
 				if (!errored)
 				{
+					ExtractModComponentsFromArchives(downloadedData, installedMod);
 					try
 					{
 						foreach (InstalledFileDetail oldFile in installedMod.Files)
 						{
+							if (IsModComponent(oldFile.filepath) && !HasReplacementForComponent(oldFile.filepath, downloadedData))
+							{
+								Logger.Debug($"Keeping existing .modcomponent file because no replacement was downloaded: {oldFile.filepath}");
+								continue;
+							}
 							try
 							{
-	//							Logger.Msg($"Deleting {oldFile.filepath}");
+	//								Logger.Msg($"Deleting {oldFile.filepath}");
 								File.Delete(oldFile.filepath);
 							} catch (Exception e)
 							{
-//								Logger.Msg($"NOPE! Deleting {oldFile.filepath}, lets rename it instead");
+	//								Logger.Msg($"NOPE! Deleting {oldFile.filepath}, lets rename it instead");
 								File.Move(oldFile.filepath,oldFile.filepath + ".rem");
 							}
 						}
@@ -171,7 +252,6 @@ namespace AutoUpdatingPlugin
 						return;
 					}
 				}
-
 			}
 			catch (Exception e)
 			{
