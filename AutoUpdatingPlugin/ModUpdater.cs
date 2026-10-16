@@ -17,7 +17,7 @@ namespace AutoUpdatingPlugin
 
 		internal static bool pluginUpdated = false;
 
-		//Added .modcomponent support
+		//Added .modcomponent support (AI assisted here a bit)
 		private static bool IsModComponent(string path)
 		{
 			return string.Equals(Path.GetExtension(path), ".modcomponent", StringComparison.OrdinalIgnoreCase);
